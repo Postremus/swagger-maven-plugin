@@ -236,7 +236,7 @@ public abstract class AbstractReader {
         return com.github.kongchen.swagger.docgen.util.TypeUtils.isPrimitive(cls);
     }
 
-    protected void updateOperation(String[] apiConsumes, String[] apiProduces, Map<String, Tag> tags, List<SecurityRequirement> securities, Operation operation) {
+    protected void updateOperation(Collection<String> apiConsumes, Collection<String> apiProduces, Map<String, Tag> tags, List<SecurityRequirement> securities, Operation operation) {
         if (operation == null) {
             return;
         }
@@ -396,28 +396,14 @@ public abstract class AbstractReader {
         }
     }
 
-    protected String[] updateOperationProduces(String[] parentProduces, String[] apiProduces, Operation operation) {
-        if (parentProduces != null) {
-            Set<String> both = new LinkedHashSet<>(Arrays.asList(apiProduces));
-            both.addAll(Arrays.asList(parentProduces));
-            if (operation.getProduces() != null) {
-                both.addAll(operation.getProduces());
+    protected <T> Collection<T> mergeArrays(T[]... arrays) {
+        Collection<T> retValue = new LinkedHashSet<>();
+        for (T[] value : arrays) {
+            if (value != null) {
+                Collections.addAll(retValue, value);
             }
-            apiProduces = both.toArray(new String[both.size()]);
         }
-        return apiProduces;
-    }
-
-    protected String[] updateOperationConsumes(String[] parentConsumes, String[] apiConsumes, Operation operation) {
-        if (parentConsumes != null) {
-            Set<String> both = new LinkedHashSet<>(Arrays.asList(apiConsumes));
-            both.addAll(Arrays.asList(parentConsumes));
-            if (operation.getConsumes() != null) {
-                both.addAll(operation.getConsumes());
-            }
-            apiConsumes = both.toArray(new String[both.size()]);
-        }
-        return apiConsumes;
+        return retValue;
     }
 
     protected void readImplicitParameters(Method method, Operation operation) {

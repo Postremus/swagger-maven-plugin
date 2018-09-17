@@ -4,6 +4,7 @@ import com.github.kongchen.swagger.docgen.GenerateException;
 import com.github.kongchen.swagger.docgen.spring.SpringResource;
 import com.github.kongchen.swagger.docgen.spring.SpringSwaggerExtension;
 import com.github.kongchen.swagger.docgen.util.SpringUtils;
+import com.google.common.collect.Lists;
 import io.swagger.annotations.*;
 import io.swagger.converter.ModelConverters;
 import io.swagger.jaxrs.ext.SwaggerExtension;
@@ -117,9 +118,9 @@ public class SpringMvcApiReader extends AbstractReader implements ClassSwaggerRe
                 for (RequestMethod requestMethod : requestMapping.method()) {
                     String httpMethod = requestMethod.toString().toLowerCase();
                     Operation operation = parseMethod(method, requestMethod);
-
+                    updateTagsForOperation(operation, apiOperation);
+                    updatePath(operationPath, httpMethod, operation);
                     updateOperationParameters(new ArrayList<Parameter>(), regexMap, operation);
-
                     updateOperationProtocols(apiOperation, operation);
 
                     String[] apiProduces = requestMapping.produces();
@@ -128,12 +129,7 @@ public class SpringMvcApiReader extends AbstractReader implements ClassSwaggerRe
                     apiProduces = (apiProduces.length == 0) ? controllerProduces : apiProduces;
                     apiConsumes = (apiConsumes.length == 0) ? controllerConsumes : apiConsumes;
 
-                    apiConsumes = updateOperationConsumes(new String[0], apiConsumes, operation);
-                    apiProduces = updateOperationProduces(new String[0], apiProduces, operation);
-
-                    updateTagsForOperation(operation, apiOperation);
-                    updateOperation(apiConsumes, apiProduces, tags, resourceSecurities, operation);
-                    updatePath(operationPath, httpMethod, operation);
+                    updateOperation(Lists.newArrayList(apiConsumes), Lists.newArrayList(apiProduces), tags, resourceSecurities, operation);
                 }
             }
         }

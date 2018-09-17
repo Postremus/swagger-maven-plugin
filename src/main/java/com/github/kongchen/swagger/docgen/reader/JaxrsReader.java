@@ -59,7 +59,7 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
     }
 
     public Swagger read(Class<?> cls) {
-        return read(cls, "", null, false, new String[0], new String[0], new HashMap<String, Tag>(), new ArrayList<Parameter>());
+        return read(cls, "", null, false, null, null, new HashMap<String, Tag>(), new ArrayList<Parameter>());
     }
 
     protected Swagger read(Class<?> cls, String parentPath, String parentMethod, boolean readHidden, String[] parentConsumes,
@@ -68,7 +68,6 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
             swagger = new Swagger();
         }
         Api api = AnnotationUtils.findAnnotation(cls, Api.class);
-        Path apiPath = AnnotationUtils.findAnnotation(cls, Path.class);
 
         // only read if allowing hidden apis OR api is not marked as hidden
         if (!canReadApi(readHidden, api)) {
@@ -79,7 +78,7 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
         List<SecurityRequirement> securities = getSecurityRequirements(api);
         Map<String, Tag> discoveredTags = scanClasspathForTags();
 
-        // merge consumes, pro duces
+        // merge consumes, produces
 
         // look for method-level annotated properties
 
@@ -92,27 +91,18 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
             if (apiOperation != null && apiOperation.hidden()) {
                 continue;
             }
+            Path apiPath = AnnotationUtils.findAnnotation(cls, Path.class);
+            String apiPathValue = apiPath == null ? null : apiPath.value();
             Path methodPath = AnnotationUtils.findAnnotation(method, Path.class);
+            String methodPathValue = methodPath == null ? null : methodPath.value();
 
-            String parentPathValue = String.valueOf(parentPath);
+            String parentPathValue = parentPath;
             //is method default handler within a subresource
             if(apiPath == null && methodPath == null && parentPath != null && readHidden){
-                final String updatedMethodPath = String.valueOf(parentPath);
-                Path path = new Path(){
-                    @Override
-                    public String value(){
-                        return updatedMethodPath;
-                    }
-
-                    @Override
-                    public Class<? extends Annotation> annotationType() {
-                        return Path.class;
-                    }
-                };
-                methodPath = path;
+                methodPathValue = parentPath;
                 parentPathValue = null;
             }
-            String operationPath = getPath(apiPath, methodPath, parentPathValue);
+            String operationPath = getPath(apiPathValue, methodPathValue, parentPathValue);
             if (operationPath != null) {
                 Map<String, String> regexMap = new HashMap<>();
                 operationPath = parseOperationPath(operationPath, regexMap);
@@ -126,25 +116,26 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
                 String[] apiConsumes = new String[0];
                 String[] apiProduces = new String[0];
 
-                Consumes consumes = AnnotationUtils.findAnnotation(cls, Consumes.class);
-                if (consumes != null) {
-                    apiConsumes = consumes.value();
+                Consumes consumesAnnotation = AnnotationUtils.findAnnotation(cls, Consumes.class);
+                if (consumesAnnotation != null) {
+                    apiConsumes = consumesAnnotation.value();
                 }
-                Produces produces = AnnotationUtils.findAnnotation(cls, Produces.class);
-                if (produces != null) {
-                    apiProduces = produces.value();
+                Produces producesAnnotation = AnnotationUtils.findAnnotation(cls, Produces.class);
+                if (producesAnnotation != null) {
+                    apiProduces = producesAnnotation.value();
                 }
 
-                apiConsumes = updateOperationConsumes(parentConsumes, apiConsumes, operation);
-                apiProduces = updateOperationProduces(parentProduces, apiProduces, operation);
+                Collection<String> consumes = mergeArrays(parentConsumes, apiConsumes);
+                Collection<String> produces = mergeArrays(parentProduces, apiProduces);
 
-                handleSubResource(apiConsumes, httpMethod, apiProduces, tags, method, apiOperation, operationPath, operation);
+                handleSubResource(consumes, produces, httpMethod, tags, method, apiOperation, operationPath, operation);
+
+                updateOperation(consumes, produces, tags, securities, operation);
 
                 // can't continue without a valid http method
                 httpMethod = (httpMethod == null) ? parentMethod : httpMethod;
-                updateTagsForOperation(operation, apiOperation);
-                updateOperation(apiConsumes, apiProduces, tags, securities, operation);
                 updatePath(operationPath, httpMethod, operation);
+                updateTagsForOperation(operation, apiOperation);
             }
             updateTagDescriptions(discoveredTags);
         }
@@ -191,14 +182,14 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
         return tags;
     }
 
-    private void handleSubResource(String[] apiConsumes, String httpMethod, String[] apiProduces, Map<String, Tag> tags, Method method, ApiOperation apiOperation, String operationPath, Operation operation) {
+    private void handleSubResource(Collection<String> apiConsumes, Collection<String> apiProduces, String httpMethod, Map<String, Tag> tags, Method method, ApiOperation apiOperation, String operationPath, Operation operation) {
         if (isSubResource(httpMethod, method)) {
             Class<?> responseClass = method.getReturnType();
             if (apiOperation != null && !apiOperation.response().equals(Void.class) && !apiOperation.response().equals(void.class)) {
                 responseClass = apiOperation.response();
             }
             LOGGER.debug("handling sub-resource method " + method.toString() + " -> " + responseClass);
-            read(responseClass, operationPath, httpMethod, true, apiConsumes, apiProduces, tags, operation.getParameters());
+            read(responseClass, operationPath, httpMethod, true, apiConsumes.toArray(new String[0]), apiProduces.toArray(new String[0]), tags, operation.getParameters());
         }
     }
 
@@ -207,7 +198,7 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
         return (responseClass != null) && (httpMethod == null) && (AnnotationUtils.findAnnotation(method, Path.class) != null);
     }
 
-    private String getPath(Path classLevelPath, Path methodLevelPath, String parentPath) {
+    private String getPath(String classLevelPath, String methodLevelPath, String parentPath) {
         if (classLevelPath == null && methodLevelPath == null) {
             return null;
         }
@@ -223,17 +214,16 @@ public class JaxrsReader extends AbstractReader implements ClassSwaggerReader {
             stringBuilder.append(parentPath);
         }
         if (classLevelPath != null) {
-            stringBuilder.append(classLevelPath.value());
+            stringBuilder.append(classLevelPath);
         }
-        if (methodLevelPath != null && !methodLevelPath.value().equals("/")) {
-            String methodPath = methodLevelPath.value();
-            if (!methodPath.startsWith("/") && !stringBuilder.toString().endsWith("/")) {
+        if (methodLevelPath != null && !methodLevelPath.equals("/")) {
+            if (!methodLevelPath.startsWith("/") && !stringBuilder.toString().endsWith("/")) {
                 stringBuilder.append("/");
             }
-            if (methodPath.endsWith("/")) {
-                methodPath = methodPath.substring(0, methodPath.length() - 1);
+            if (methodLevelPath.endsWith("/")) {
+                methodLevelPath = methodLevelPath.substring(0, methodLevelPath.length() - 1);
             }
-            stringBuilder.append(methodPath);
+            stringBuilder.append(methodLevelPath);
         }
         String output = stringBuilder.toString();
         if (!output.startsWith("/")) {
